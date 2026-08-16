@@ -127,7 +127,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: actions/setup-node@v4
-        with: { node-version: ${{ inputs.node-version }} }
+        with:
+          node-version: ${{ inputs.node-version }}
       - name: Python deps (pip-audit)
         if: ${{ inputs.python-path != '' }}
         run: |

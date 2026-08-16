@@ -1,0 +1,227 @@
+# Reusable Security Gate — call this from any repo with `uses:`.
+# =============================================================================
+# Free, deterministic ($0/run, no LLM) layered security checks + one consolidated
+# report on the run's Summary page. Runs in the CALLER's context (checkout pulls
+# the caller's code), so the caller's own tests (e.g. an access-control/IDOR
+# matrix) run alongside the generic scanners.
+#
+# Usage (in the caller repo, .github/workflows/security.yml):
+#   name: Security Gate
+#   on: [push, pull_request, workflow_dispatch]
+#   jobs:
+#     gate:
+#       uses: <owner>/security-gate/.github/workflows/gate.yml@main
+#       with:
+#         python-path: backend      # dir with requirements.txt + tests/ ("" to skip)
+#         node-path: frontend       # dir with package.json ("" to skip)
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      python-path:
+        description: 'Dir containing requirements.txt and tests/ (empty = skip Python)'
+        type: string
+        default: ''
+      node-path:
+        description: 'Dir containing package.json (empty = skip Node)'
+        type: string
+        default: ''
+      python-version:
+        type: string
+        default: '3.12'
+      node-version:
+        type: string
+        default: '20'
+      run-tests:
+        description: 'Run the caller pytest suite in <python-path>/tests'
+        type: boolean
+        default: true
+      semgrep-config:
+        description: 'Space-separated Semgrep registry configs'
+        type: string
+        default: 'p/python p/javascript p/typescript p/react p/security-audit'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # 1. Caller's own tests (access-control / IDOR matrix + regressions) ----------
+  tests:
+    name: Access-control & security tests
+    if: ${{ inputs.run-tests && inputs.python-path != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+          cache-dependency-path: ${{ inputs.python-path }}/requirements.txt
+      - name: Install deps + pytest
+        working-directory: ${{ inputs.python-path }}
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run test suite
+        working-directory: ${{ inputs.python-path }}
+        run: |
+          if [ -d tests ]; then
+            python -m pytest tests -q --junitxml="$GITHUB_WORKSPACE/pytest-report.xml"
+          else
+            echo "no tests/ dir — skipping"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: tests-report, path: pytest-report.xml, if-no-files-found: warn }
+
+  # 2. SAST — Semgrep ----------------------------------------------------------
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install semgrep
+      - name: Run Semgrep (fails on findings)
+        run: |
+          CFG=""
+          for c in ${{ inputs.semgrep-config }}; do CFG="$CFG --config $c"; done
+          semgrep scan $CFG --error --json --output semgrep.json --metrics off .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: semgrep-report, path: semgrep.json, if-no-files-found: warn }
+
+  # 3. Secrets — gitleaks ------------------------------------------------------
+  secrets:
+    name: Secrets scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install gitleaks
+        run: |
+          VER=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+                | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks && sudo mv gitleaks /usr/local/bin/gitleaks
+      - run: gitleaks detect --source . --redact --verbose --exit-code 1 --report-path gitleaks.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: gitleaks-report, path: gitleaks.json, if-no-files-found: ignore }
+
+  # 4. SCA — dependency CVEs (advisory) ----------------------------------------
+  sca:
+    name: Dependency CVEs (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ inputs.node-version }} }
+      - name: Python deps (pip-audit)
+        if: ${{ inputs.python-path != '' }}
+        run: |
+          pip install pip-audit
+          pip-audit -r "${{ inputs.python-path }}/requirements.txt" -f json -o pip-audit.json || true
+      - name: Node deps (npm audit)
+        if: ${{ inputs.node-path != '' }}
+        run: (cd "${{ inputs.node-path }}" && npm audit --json > "$GITHUB_WORKSPACE/npm-audit.json" || true)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sca-report
+          path: |
+            pip-audit.json
+            npm-audit.json
+          if-no-files-found: warn
+
+  # 5. Consolidated report (report script inlined so callers need no files) -----
+  report:
+    name: Consolidated report
+    runs-on: ubuntu-latest
+    needs: [tests, sast, secrets, sca]
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: reports }
+      - name: Build consolidated summary
+        env:
+          TESTS_RESULT: ${{ needs.tests.result }}
+          SAST_RESULT: ${{ needs.sast.result }}
+          SECRETS_RESULT: ${{ needs.secrets.result }}
+          SCA_RESULT: ${{ needs.sca.result }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > /tmp/report.py <<'PYEOF'
+          import json, os, subprocess
+          from pathlib import Path
+          R = Path("reports")
+          def load(p):
+              try: return json.loads(Path(p).read_text())
+              except Exception: return None
+          def emoji(r): return {"success":"✅","failure":"❌","skipped":"⚪","cancelled":"⚪"}.get(r,"❓")
+          def semgrep():
+              d = load(R/"semgrep-report"/"semgrep.json")
+              return "n/a" if d is None else str(len(d.get("results",[])))
+          def gitleaks():
+              p = R/"gitleaks-report"/"gitleaks.json"; d = load(p)
+              if d is None: return "0" if not p.exists() else "n/a"
+              return str(len(d)) if isinstance(d,list) else "n/a"
+          def tests():
+              p = R/"tests-report"/"pytest-report.xml"
+              try:
+                  import xml.etree.ElementTree as ET
+                  root = ET.parse(p).getroot()
+                  s = root if root.tag=="testsuite" else root.find("testsuite")
+                  t = int(s.get("tests",0)); bad = int(s.get("failures",0))+int(s.get("errors",0))
+                  return f"{t-bad}/{t} passed"
+              except Exception: return "n/a"
+          def sca():
+              out=[]
+              pa=load(R/"sca-report"/"pip-audit.json")
+              if isinstance(pa,dict):
+                  deps=pa.get("dependencies",pa.get("vulnerabilities",[]))
+                  n=sum(len(x.get("vulns",[])) for x in deps) if isinstance(deps,list) else 0
+                  out.append(f"pip: {n}")
+              elif isinstance(pa,list): out.append(f"pip: {sum(len(x.get('vulns',[])) for x in pa)}")
+              na=load(R/"sca-report"/"npm-audit.json")
+              if isinstance(na,dict):
+                  v=na.get("metadata",{}).get("vulnerabilities",{})
+                  out.append(f"npm: {v.get('total',0)} ({v.get('high',0)+v.get('critical',0)} high/crit)")
+              return ", ".join(out) if out else "n/a"
+          def strix():
+              try:
+                  o=subprocess.run(["gh","run","list","--repo",os.environ.get("REPO",""),
+                      "--workflow","strix-security.yml","--limit","1","--json","conclusion,createdAt,url"],
+                      capture_output=True,text=True,timeout=30).stdout
+                  runs=json.loads(o)
+                  if not runs: return "not configured"
+                  r=runs[0]; return f"[{r.get('conclusion') or 'in progress'}]({r.get('url')}) · {(r.get('createdAt') or '')[:10]}"
+              except Exception: return "not configured"
+          tr,sr,kr,cr=(os.environ.get(k,"unknown") for k in ("TESTS_RESULT","SAST_RESULT","SECRETS_RESULT","SCA_RESULT"))
+          ok=all(x in ("success","skipped") for x in (tr,sr,kr))
+          verdict="✅ **PASS** — all blocking layers clean" if ok else "❌ **FAIL** — a blocking layer has findings"
+          rows=[("Access-control / IDOR + security tests",emoji(tr),tests(),"blocking"),
+                ("SAST (Semgrep)",emoji(sr),f"{semgrep()} findings","blocking"),
+                ("Secrets (gitleaks)",emoji(kr),f"{gitleaks()} leaks","blocking"),
+                ("Dependency CVEs",emoji(cr),sca(),"advisory"),
+                ("AI pentest (Strix)","🔍",strix(),"separate · paid")]
+          print("## 🔒 Security Gate report\n"); print(f"### {verdict}\n")
+          print("| Layer | Status | Detail | Policy |"); print("|---|---|---|---|")
+          for n,s,d,p in rows: print(f"| {n} | {s} | {d} | {p} |")
+          print("\n> Dependency CVEs also surface natively via **Dependabot alerts**.")
+          print("> A strong confidence bar, not a proof of 100% security.")
+          PYEOF
+          python3 /tmp/report.py >> "$GITHUB_STEP_SUMMARY"

@@ -130,28 +130,3 @@ jobs:
             pip-audit.json
             npm-audit.json
           if-no-files-found: warn
-
-  report:
-    name: Consolidated report
-    runs-on: ubuntu-latest
-    needs: [tests, sast, secrets, sca]
-    if: always()
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: Nilufer-Shah/security-gate
-          ref: main
-          path: _gate
-      - uses: actions/download-artifact@v4
-        with:
-          path: reports
-      - name: Build consolidated summary
-        env:
-          TESTS_RESULT: ${{ needs.tests.result }}
-          SAST_RESULT: ${{ needs.sast.result }}
-          SECRETS_RESULT: ${{ needs.secrets.result }}
-          SCA_RESULT: ${{ needs.sca.result }}
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: python3 _gate/scripts/security_report.py >> "$GITHUB_STEP_SUMMARY"

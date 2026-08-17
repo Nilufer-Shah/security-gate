@@ -87,14 +87,14 @@ def strix():
 def main():
     tr, sr, kr, cr = (os.environ.get(k, "unknown")
                       for k in ("TESTS_RESULT", "SAST_RESULT", "SECRETS_RESULT", "SCA_RESULT"))
-    ok = all(x in ("success", "skipped") for x in (tr, sr, kr))
+    ok = all(x in ("success", "skipped") for x in (tr, sr, kr, cr))
     verdict = ("✅ **PASS** — all blocking layers clean" if ok
                else "❌ **FAIL** — a blocking layer has findings")
     rows = [
         ("Access-control / IDOR + security tests", emoji(tr), tests(), "blocking"),
         ("SAST (Semgrep)", emoji(sr), f"{semgrep()} findings", "blocking"),
         ("Secrets (gitleaks)", emoji(kr), f"{gitleaks()} leaks", "blocking"),
-        ("Dependency CVEs", emoji(cr), sca(), "advisory"),
+        ("Dependency CVEs", emoji(cr), sca(), "blocking"),
         ("AI pentest (Strix)", "🔍", strix(), "separate · paid"),
     ]
     print("## 🔒 Security Gate report\n")

@@ -69,3 +69,10 @@ jobs:
             pip-audit.json
             npm-audit.json
           if-no-files-found: warn
+  report:
+    name: Consolidated report
+    runs-on: ubuntu-latest
+    needs: [tests, sast, secrets, sca]
+    if: always()
+    steps:
+      - run: echo "report placeholder tests=${{ needs.tests.result }}" >> "$GITHUB_STEP_SUMMARY"

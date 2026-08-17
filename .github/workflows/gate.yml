@@ -131,8 +131,10 @@ jobs:
           pip install pip-audit==2.10.1   # pinned
           IGN=""
           if [ -f .security/sca-allowlist.txt ]; then
-            while IFS= read -r id; do
-              case "$id" in ''|\#*) ;; *) IGN="$IGN --ignore-vuln $id" ;; esac
+            while IFS= read -r line || [ -n "$line" ]; do
+              id="${line%%#*}"                       # drop any inline "# justification"
+              id="$(printf '%s' "$id" | tr -d '[:space:]')"   # keep only the bare ID
+              [ -n "$id" ] && IGN="$IGN --ignore-vuln $id"
             done < .security/sca-allowlist.txt
           fi
           pip-audit -r "${{ inputs.python-path }}/requirements.txt" -f json -o pip-audit.json $IGN

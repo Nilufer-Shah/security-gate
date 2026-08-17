@@ -26,3 +26,18 @@ jobs:
           CFG=""
           for c in ${{ inputs.semgrep-config }}; do CFG="$CFG --config $c"; done
           semgrep scan $CFG --error --json --output semgrep.json --metrics off .
+  secrets:
+    name: Secrets scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          VER=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+                | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks && sudo mv gitleaks /usr/local/bin/gitleaks
+      - run: gitleaks detect --source . --redact --verbose --exit-code 1 --report-path gitleaks.json

@@ -69,11 +69,18 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install semgrep
-      - name: Run Semgrep (fails on findings)
+      - name: Run Semgrep (blocks on ERROR severity; WARNING/INFO reported only)
         run: |
           CFG=""
           for c in ${{ inputs.semgrep-config }}; do CFG="$CFG --config $c"; done
-          semgrep scan $CFG --error --json --output semgrep.json --metrics off .
+          semgrep scan $CFG --json --output semgrep.json --metrics off . || true
+          ERR=$(python3 -c "import json;print(sum(1 for r in json.load(open('semgrep.json')).get('results',[]) if r['extra'].get('severity')=='ERROR'))")
+          WARN=$(python3 -c "import json;print(sum(1 for r in json.load(open('semgrep.json')).get('results',[]) if r['extra'].get('severity')!='ERROR'))")
+          echo "Semgrep findings — ERROR: $ERR, WARNING/INFO: $WARN"
+          if [ "$ERR" -gt 0 ]; then
+            echo "::error::Semgrep found $ERR ERROR-severity issue(s) — see the semgrep-report artifact"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

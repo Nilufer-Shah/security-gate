@@ -47,6 +47,28 @@ jobs:
 | `run-tests` | `true` | Run `pytest` in `<python-path>/tests`. |
 | `semgrep-config` | `p/python p/javascript p/typescript p/react p/security-audit` | Semgrep registry configs. |
 
+## Post-hardening checklist (re-test after security changes)
+
+This gate is **read-only** — it analyzes your code and never modifies the app, so it can't cause a
+runtime regression on its own. The risk lives in the *fixes you apply after it flags something*: a
+dependency bump or a hardening patch can expose a latent bug or break a runtime path the unit tests
+don't cover. Two failure modes we've actually hit — check both before you ship a security change:
+
+- **After a dependency/framework bump the SCA flagged** → smoke-test the app end-to-end, not just
+  unit tests. Major bumps surface latent app bugs. *(Real case: a patch-level Next.js bump that
+  fixed a CVE also activated React 18 Strict Mode's double-invoked state updater, which exposed an
+  **impure `setState` updater** — a mutable closure flag — that silently dropped a rendered message.
+  State updaters must be pure: derive the next state only from the `prev` argument, no external
+  mutable flags.)*
+
+- **After adding response middleware (security headers, CSP, etc.)** → verify any **streaming
+  endpoints (SSE / chunked)** still stream. Inject headers with **pure ASGI middleware**, never
+  Starlette's `BaseHTTPMiddleware` / `@app.middleware("http")` — those buffer the full response body
+  and break SSE. (Wrap `send` and set headers on the `http.response.start` message instead.)
+
+General rule: every security fix gets one manual pass through the app's happy path — especially
+login, streaming/real-time, and file upload — before merge. Unit-test green ≠ app works.
+
 ## Notes
 
 - **Private repos:** this repo's Actions access is set to "accessible from repositories owned by

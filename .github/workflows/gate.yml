@@ -20,7 +20,7 @@ on:
       python-version: { type: string, default: '3.12' }
       node-version: { type: string, default: '20' }
       run-tests: { description: 'Run caller pytest in <python-path>/tests', type: boolean, default: true }
-      semgrep-config: { type: string, default: 'p/python p/javascript p/typescript p/react p/security-audit' }
+      semgrep-config: { type: string, default: 'p/python p/javascript p/typescript p/react p/security-audit p/owasp-top-ten p/secrets p/jwt' }
 
 permissions:
   contents: read

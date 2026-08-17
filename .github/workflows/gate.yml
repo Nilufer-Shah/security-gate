@@ -41,3 +41,15 @@ jobs:
             "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
           tar -xzf gitleaks.tar.gz gitleaks && sudo mv gitleaks /usr/local/bin/gitleaks
       - run: gitleaks detect --source . --redact --verbose --exit-code 1 --report-path gitleaks.json
+  sca:
+    name: Dependency CVEs (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Node deps (npm audit)
+        if: ${{ inputs.node-path != '' }}
+        run: (cd "${{ inputs.node-path }}" && npm audit --json > "$GITHUB_WORKSPACE/npm-audit.json" || true)

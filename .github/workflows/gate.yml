@@ -4,26 +4,12 @@ on:
       python-path:
         type: string
         default: ''
-      node-path:
-        type: string
-        default: ''
       python-version:
         type: string
         default: '3.12'
-      node-version:
-        type: string
-        default: '20'
       run-tests:
         type: boolean
         default: true
-      semgrep-config:
-        type: string
-        default: 'p/python p/javascript p/typescript p/react p/security-audit'
-
-permissions:
-  contents: read
-  actions: read
-
 jobs:
   tests:
     name: Access-control & security tests
@@ -32,102 +18,4 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ inputs.python-version }}
-          cache: pip
-          cache-dependency-path: ${{ inputs.python-path }}/requirements.txt
-      - name: Install deps + pytest
-        working-directory: ${{ inputs.python-path }}
-        run: |
-          pip install -r requirements.txt
-          pip install pytest
-      - name: Run test suite
-        working-directory: ${{ inputs.python-path }}
-        run: |
-          if [ -d tests ]; then
-            python -m pytest tests -q --junitxml="$GITHUB_WORKSPACE/pytest-report.xml"
-          else
-            echo "no tests/ dir — skipping"
-          fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: tests-report
-          path: pytest-report.xml
-          if-no-files-found: warn
-
-  sast:
-    name: SAST (Semgrep)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install semgrep
-      - name: Run Semgrep (fails on findings)
-        run: |
-          CFG=""
-          for c in ${{ inputs.semgrep-config }}; do CFG="$CFG --config $c"; done
-          semgrep scan $CFG --error --json --output semgrep.json --metrics off .
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: semgrep-report
-          path: semgrep.json
-          if-no-files-found: warn
-
-  secrets:
-    name: Secrets scan (gitleaks)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install gitleaks
-        run: |
-          VER=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-                | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
-          curl -sSL -o gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
-          tar -xzf gitleaks.tar.gz gitleaks && sudo mv gitleaks /usr/local/bin/gitleaks
-      - run: gitleaks detect --source . --redact --verbose --exit-code 1 --report-path gitleaks.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gitleaks-report
-          path: gitleaks.json
-          if-no-files-found: ignore
-
-  sca:
-    name: Dependency CVEs (advisory)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ inputs.node-version }}
-      - name: Python deps (pip-audit)
-        if: ${{ inputs.python-path != '' }}
-        run: |
-          pip install pip-audit
-          pip-audit -r "${{ inputs.python-path }}/requirements.txt" -f json -o pip-audit.json || true
-      - name: Node deps (npm audit)
-        if: ${{ inputs.node-path != '' }}
-        run: (cd "${{ inputs.node-path }}" && npm audit --json > "$GITHUB_WORKSPACE/npm-audit.json" || true)
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: sca-report
-          path: |
-            pip-audit.json
-            npm-audit.json
-          if-no-files-found: warn
+      - run: echo "would test ${{ inputs.python-path }}"

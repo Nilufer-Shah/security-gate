@@ -1,16 +1,17 @@
 on:
   workflow_call:
     inputs:
-      python-path:
-        type: string
-        default: ''
-      run-tests:
-        type: boolean
-        default: true
+      python-path: { type: string, default: '' }
+      node-path: { type: string, default: '' }
+      python-version: { type: string, default: '3.12' }
+      node-version: { type: string, default: '20' }
+      run-tests: { type: boolean, default: true }
+      semgrep-config: { type: string, default: 'p/python p/security-audit' }
 jobs:
   tests:
     name: Access-control & security tests
+    if: ${{ inputs.run-tests && inputs.python-path != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "no if; path=${{ inputs.python-path }} run=${{ inputs.run-tests }}"
+      - run: echo "tests path=${{ inputs.python-path }}"

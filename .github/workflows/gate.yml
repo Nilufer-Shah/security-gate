@@ -4,18 +4,13 @@ on:
       python-path:
         type: string
         default: ''
-      python-version:
-        type: string
-        default: '3.12'
       run-tests:
         type: boolean
         default: true
 jobs:
   tests:
     name: Access-control & security tests
-    if: ${{ inputs.run-tests && inputs.python-path != '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - run: echo "would test ${{ inputs.python-path }}"
+      - run: echo "no if; path=${{ inputs.python-path }} run=${{ inputs.run-tests }}"

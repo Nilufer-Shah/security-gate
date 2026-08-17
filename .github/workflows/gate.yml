@@ -134,7 +134,7 @@ jobs:
             while IFS= read -r line || [ -n "$line" ]; do
               id="${line%%#*}"                       # drop any inline "# justification"
               id="$(printf '%s' "$id" | tr -d '[:space:]')"   # keep only the bare ID
-              [ -n "$id" ] && IGN="$IGN --ignore-vuln $id"
+              case "$id" in ''|npm:*) ;; *) IGN="$IGN --ignore-vuln $id" ;; esac  # npm: entries handled below
             done < .security/sca-allowlist.txt
           fi
           pip-audit -r "${{ inputs.python-path }}/requirements.txt" -f json -o pip-audit.json $IGN
@@ -142,8 +142,24 @@ jobs:
         if: ${{ inputs.node-path != '' }}
         run: |
           cd "${{ inputs.node-path }}"
-          npm audit --json > "$GITHUB_WORKSPACE/npm-audit.json" || true   # keep the report...
-          npm audit --audit-level=high                                    # ...but fail on high/critical
+          npm audit --json > "$GITHUB_WORKSPACE/npm-audit.json" || true   # keep the report
+          # Block on high/critical, except packages allowlisted as `npm:<package>` (documented exceptions).
+          node -e '
+            const fs = require("fs");
+            const audit = JSON.parse(fs.readFileSync(process.env.GITHUB_WORKSPACE + "/npm-audit.json", "utf8"));
+            const allow = new Set();
+            const alf = process.env.GITHUB_WORKSPACE + "/.security/sca-allowlist.txt";
+            if (fs.existsSync(alf)) for (let l of fs.readFileSync(alf, "utf8").split("\n")) {
+              l = l.split("#")[0].trim();
+              if (l.startsWith("npm:")) allow.add(l.slice(4));
+            }
+            const bad = [];
+            for (const [pkg, v] of Object.entries(audit.vulnerabilities || {}))
+              if ((v.severity === "high" || v.severity === "critical") && !allow.has(pkg))
+                bad.push(pkg + " (" + v.severity + ")");
+            if (bad.length) { console.error("::error::Blocking npm high/critical (not allowlisted): " + bad.join(", ")); process.exit(1); }
+            console.log("npm audit: no non-allowlisted high/critical vulnerabilities.");
+          '
       - uses: actions/upload-artifact@v4
         if: always()
         with:

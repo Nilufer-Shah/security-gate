@@ -53,3 +53,19 @@ jobs:
       - name: Node deps (npm audit)
         if: ${{ inputs.node-path != '' }}
         run: (cd "${{ inputs.node-path }}" && npm audit --json > "$GITHUB_WORKSPACE/npm-audit.json" || true)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python deps (pip-audit)
+        if: ${{ inputs.python-path != '' }}
+        run: |
+          pip install pip-audit
+          pip-audit -r "${{ inputs.python-path }}/requirements.txt" -f json -o pip-audit.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sca-report
+          path: |
+            pip-audit.json
+            npm-audit.json
+          if-no-files-found: warn

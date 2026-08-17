@@ -25,6 +25,9 @@ Add `.github/workflows/security.yml` to your repo:
 ```yaml
 name: Security Gate
 on: [push, pull_request, workflow_dispatch]
+permissions:              # REQUIRED: a reusable workflow can't request more than the caller grants
+  contents: read
+  actions: read
 jobs:
   gate:
     uses: Nilufer-Shah/security-gate/.github/workflows/gate.yml@main
